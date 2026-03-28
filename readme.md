@@ -44,7 +44,7 @@ Clonez le dépôt et lancez le script de configuration automatique :
 
 ```bash
 git clone https://github.com/Jfou13/honeypot_soc.git
-cd ssh-honeypot-soc
+cd honeypot_soc
 chmod +x setup.sh
 ./setup.sh
 ```
