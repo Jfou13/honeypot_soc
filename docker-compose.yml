@@ -1,0 +1,42 @@
+services:
+  honeypot:
+    build: ./honeypot
+    container_name: honeypot-ssh
+    env_file: .env
+    environment:
+      - LISTEN_PORT=22
+      - DB_HOST=db
+      - TZ=Europe/Paris
+    ports:
+      - "${SSH_PORT}:22"
+    volumes:
+      - ./honeypot/honeypot.py:/app/honeypot.py
+      - ./data:/app/data
+      - ./data/geoip:/var/lib/GeoIP
+      - ./GeoIP.conf:/etc/GeoIP.conf
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    container_name: honeypot-db
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    container_name: honeypot-dashboard
+    env_file: .env
+    environment:
+      - TZ=Europe/Paris
+    ports:
+      - "${DASHBOARD_PORT}:5000"
+    depends_on:
+      - db
+    restart: unless-stopped

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeypot SOC Dashboard - Live</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='leaflet.css') }}" />
+
+    <style>
+        :root {
+            --neon: #00ff41;
+            --bg: #0a0a0a;
+            --panel: #141414;
+            --red: #ff003c;
+            --blue: #00d4ff;
+            --green: #00ff00;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--neon);
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        /* --- HEADER --- */
+        .header-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px dashed var(--neon);
+            padding-bottom: 10px;
+        }
+
+        h1 { margin: 0; font-size: 1.4em; letter-spacing: 2px; }
+
+        #live-clock {
+            margin: 10px 0;
+            font-size: 1.1em;
+            color: #888;
+            font-weight: bold;
+        }
+
+        /* --- BOUTON RESET --- */
+        #reset-btn {
+            background: var(--red);
+            color: white;
+            border: 1px solid white;
+            padding: 8px 15px;
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        #reset-btn:hover {
+            background: white;
+            color: var(--red);
+            box-shadow: 0 0 10px var(--red);
+        }
+
+        /* --- CARTE --- */
+        #map {
+            height: 450px;
+            background: #000;
+            border: 1px solid #333;
+            margin-bottom: 20px;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+        }
+
+        /* --- LAYOUT GRID --- */
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr; /* 3 colonnes égales */
+            gap: 15px;
+        }
+        
+        /* Permet à un élément de prendre 2 colonnes sur 3 */
+        .span-2 { grid-column: span 2; }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid #222;
+            padding: 12px;
+            height: 350px; /* Hauteur fixe pour l'alignement */
+            overflow-y: auto;
+        }
+        
+        /* On augmente un peu la hauteur de la ligne du bas pour l'historique */
+        .tall-panel { height: 450px; }
+
+        .panel h3 {
+            font-size: 0.9em;
+            margin: 0 0 10px 0;
+            color: #888;
+            border-left: 3px solid var(--neon);
+            padding-left: 10px;
+            text-transform: uppercase;
+        }
+
+        /* --- TABLEAUX --- */
+        table { width: 100%; border-collapse: collapse; font-size: 0.75em; }
+        th { text-align: left; color: #555; padding: 5px; border-bottom: 1px solid #222; }
+        td { padding: 6px; border-bottom: 1px solid #1a1a1a; text-align: left; }
+
+        .count { color: var(--red); font-weight: bold; text-align: right; }
+        .timestamp { color: #777; font-size: 0.9em; white-space: nowrap; }
+
+        /* --- INTERACTION --- */
+        .clickable-row { cursor: pointer; transition: 0.2s; }
+        .clickable-row:hover { background: #222 !important; color: #fff; }
+
+        /* Popup Style */
+        .leaflet-popup-content-wrapper { background: #1a1a1a; color: #fff; border: 1px solid var(--green); font-family: monospace; }
+        .leaflet-popup-tip { background: var(--green); }
+
+        /* Scrollbar custom */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #050505; }
+        ::-webkit-scrollbar-thumb { background: #222; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--neon); }
+    </style>
+</head>
+<body>
+
+    <header class="header-main">
+        <h1>[ SSH THREAT INTELLIGENCE CENTER ]</h1>
+        <button id="reset-btn" onclick="confirmReset()">EFFACER LES DONNÉES</button>
+    </header>
+
+    <div id="live-clock">CHARGEMENT HORLOGE...</div>
+
+    <div id="map"></div>
+
+    <div class="container">
+        <div class="panel">
+            <h3>TOP 20 LOGINS</h3>
+            <table id="t-logins"></table>
+        </div>
+        <div class="panel">
+            <h3>TOP 20 PASSWORDS</h3>
+            <table id="t-pass"></table>
+        </div>
+        <div class="panel">
+            <h3>TOP 10 PAYS</h3>
+            <table id="t-countries"></table>
+        </div>
+
+        <div class="panel tall-panel">
+            <h3>TOP 10 CREDENTIALS (USER/PASS)</h3>
+            <table id="t-combos"></table>
+        </div>
+        
+        <div class="panel span-2 tall-panel">
+            <h3>HISTORIQUE DES 50 DERNIÈRES CONNEXIONS (CLIQUER POUR LOCALISER)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date & Heure</th>
+                        <th>IP Address</th>
+                        <th>Localisation</th>
+                        <th>User</th>
+                        <th>Password</th>
+                    </tr>
+                </thead>
+                <tbody id="t-recent"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='leaflet.js') }}"></script>
+    <script>
+        // --- CONFIGURATION CARTE ---
+        const map = L.map('map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© CartoDB'
+        }).addTo(map);
+
+        let markersMap = new Map();
+        let serverMarker = null;
+        let highlightMarker = null;
+        let serverCoords = null;
+
+        // --- 1. HORLOGE (PARIS TIME YYYY/MM/DD) ---
+        function updateClock() {
+            const now = new Date();
+            const options = {
+                timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+            };
+            const parts = new Intl.DateTimeFormat('fr-FR', options).formatToParts(now);
+            const Y = parts.find(p => p.type === 'year').value;
+            const M = parts.find(p => p.type === 'month').value;
+            const D = parts.find(p => p.type === 'day').value;
+            const h = parts.find(p => p.type === 'hour').value;
+            const m = parts.find(p => p.type === 'minute').value;
+            const s = parts.find(p => p.type === 'second').value;
+
+            document.getElementById('live-clock').innerText = `PARIS_TIME: ${Y}/${M}/${D} ${h}:${m}:${s}`;
+        }
+        setInterval(updateClock, 1000);
+
+        // --- 2. GESTION DES POINTS (FADE-OUT 20s) ---
+        function fadeElement(marker, line) {
+            let opacity = 1;
+            const timer = setInterval(() => {
+                opacity -= 0.005;
+                if (opacity <= 0) {
+                    map.removeLayer(marker);
+                    if (line) map.removeLayer(line);
+                    clearInterval(timer);
+                } else {
+                    marker.setStyle({ opacity: opacity, fillOpacity: opacity * 0.7 });
+                    if (line) line.setStyle({ opacity: opacity * 0.3 });
+                }
+            }, 100);
+        }
+
+        // --- 3. FOCUS AU CLIC (POINT VERT AVEC BULLE INFOS) ---
+        function focusAttack(lat, lon, ip, country, city, user, pass) {
+            if (highlightMarker) map.removeLayer(highlightMarker);
+
+            highlightMarker = L.circleMarker([lat, lon], {
+                radius: 12, color: '#00ff00', fillColor: '#00ff00', weight: 2, fillOpacity: 0.8
+            }).addTo(map);
+
+            const popupContent = `
+                <div style="font-size:12px;">
+                    <b style="color:var(--green);">${ip}</b><br>
+                    ${city ? city + ', ' : ''}${country}<br>
+                    <hr style="border:0; border-top:1px solid #444; margin:5px 0;">
+                    User: <b>${user}</b><br>
+                    Pass: <b>${pass}</b>
+                </div>
+            `;
+
+            highlightMarker.bindPopup(popupContent).openPopup();
+            map.flyTo([lat, lon], 4);
+        }
+
+        // --- 4. ACTION RESET ---
+        async function confirmReset() {
+            if (confirm("🚨 VOULEZ-VOUS EFFACER TOUTES LES DONNÉES DE LA BASE ?")) {
+                await fetch('/api/reset', { method: 'POST' });
+                location.reload();
+            }
+        }
+
+        // --- 5. MISE À JOUR DES DONNÉES ---
+        async function refresh() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                serverCoords = [data.server_loc.lat, data.server_loc.lon];
+
+                if (!serverMarker) {
+                    serverMarker = L.circleMarker(serverCoords, {
+                        radius: 10, color: '#00d4ff', fillColor: '#00d4ff', weight: 2, fillOpacity: 0.9
+                    }).addTo(map);
+                }
+
+                // Update Tableaux
+                document.getElementById('t-logins').innerHTML = data.top_logins.map(i => `<tr><td>${i.username}</td><td class="count">${i.count}</td></tr>`).join('');
+                document.getElementById('t-pass').innerHTML = data.top_passwords.map(i => `<tr><td>${i.password}</td><td class="count">${i.count}</td></tr>`).join('');
+                document.getElementById('t-countries').innerHTML = data.top_countries.map(i => `<tr><td>${i.country}</td><td class="count">${i.count}</td></tr>`).join('');
+                document.getElementById('t-combos').innerHTML = data.top_combos.map(i => `<tr><td>${i.username}:${i.password}</td><td class="count">${i.count}</td></tr>`).join('');
+
+                // Update Historique 50
+                document.getElementById('t-recent').innerHTML = data.recent.map(i => `
+                    <tr class="clickable-row" onclick="focusAttack(${i.lat}, ${i.lon}, '${i.ip}', '${i.country}', '${i.city}', '${i.username}', '${i.password}')">
+                        <td class="timestamp">${i.timestamp}</td>
+                        <td>${i.ip}</td>
+                        <td style="color:var(--neon)">${i.city ? i.city + ', ' : ''}${i.country}</td>
+                        <td><b>${i.username}</b></td>
+                        <td><code>${i.password}</code></td>
+                    </tr>
+                `).join('');
+
+                // Update Carte
+                data.recent.forEach(a => {
+                    if (!markersMap.has(a.id) && a.lat !== 0) {
+                        const target = [a.lat, a.lon];
+                        const line = L.polyline([serverCoords, target], {
+                            color: 'red', weight: 1, opacity: 0.4, dashArray: '5, 5'
+                        }).addTo(map);
+                        const m = L.circleMarker(target, {
+                            radius: 7, color: 'white', fillColor: 'red', weight: 1, fillOpacity: 0.7
+                        }).addTo(map);
+                        fadeElement(m, line);
+                        markersMap.set(a.id, m);
+                    }
+                });
+            } catch(e) { console.error("Sync Error:", e); }
+        }
+
+        updateClock();
+        refresh();
+        setInterval(refresh, 3000);
+    </script>
+</body>
+</html>
