@@ -43,7 +43,7 @@ L'application est conteneurisée avec Docker Compose :
 Clonez le dépôt et lancez le script de configuration automatique :
 
 ```bash
-git clone https://github.com/Jfou13/honeypot_soc.git
+git clone git@github.com:Jfou13/honeypot_soc.git
 cd ssh-honeypot-soc
 chmod +x setup.sh
 ./setup.sh
