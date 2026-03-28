@@ -126,7 +126,7 @@
 <body>
 
     <header class="header-main">
-        <h1>[ SSH THREAT INTELLIGENCE CENTER ]</h1>
+        <h1>[ SSH THREAT INTELLIGENCE CENTER ] <span id="total-counter" style="color: var(--red); margin-left: 20px;">0</span> <small style="font-size: 0.5em; color: #555;">Tentatives SSH</small></h1>
         <button id="reset-btn" onclick="confirmReset()">EFFACER LES DONNÉES</button>
     </header>
 
@@ -260,6 +260,9 @@
                         radius: 10, color: '#00d4ff', fillColor: '#00d4ff', weight: 2, fillOpacity: 0.9
                     }).addTo(map);
                 }
+
+                // Update Total Counter
+                document.getElementById('total-counter').innerText = data.total_attempts.toLocaleString();
 
                 // Update Tableaux
                 document.getElementById('t-logins').innerHTML = data.top_logins.map(i => `<tr><td>${i.username}</td><td class="count">${i.count}</td></tr>`).join('');

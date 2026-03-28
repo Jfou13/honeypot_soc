@@ -56,6 +56,10 @@ def stats():
         cursor.execute("SELECT id, ip, country, city, lat, lon, username, password, timestamp FROM attempts ORDER BY timestamp DESC LIMIT 50")
         recent = cursor.fetchall()
 
+        # 6. Total des tentatives
+        cursor.execute("SELECT COUNT(*) as total FROM attempts")
+        total_attempts = cursor.fetchone()['total']
+
         for attempt in recent:
             if attempt['timestamp']:
                 # On ajuste l'heure si le serveur est en UTC (ex: +1h ou +2h pour Paris)
@@ -66,6 +70,7 @@ def stats():
         conn.close()
 
         return jsonify({
+            "total_attempts": total_attempts,
             "top_logins": logins,
             "top_passwords": passwords,
             "top_combos": combos,
